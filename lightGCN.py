@@ -1,9 +1,3 @@
-#!/usr/bin/env python
-# -*- coding: utf-8 -*-
-# @File  : lightGCN.py
-# @Author: yanms
-# @Date  : 2023/9/23 15:10
-# @Desc  :
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
@@ -12,35 +6,43 @@ import scipy.sparse as sp
 
 
 class LightGCN(nn.Module):
-    '''
-    interaction_matrix: coo_matrix
-    '''
 
     def __init__(self, device, n_layers, n_users, n_items, interaction_matrix):
         super(LightGCN, self).__init__()
         self.device = device
         self.n_layers = n_layers
-        self.user_count = n_users
-        self.item_count = n_items
+        self.n_user = n_users
+        self.n_item = n_items
         self.interaction_matrix = interaction_matrix
-        self.A_adj_matrix = self._get_a_adj_matrix()
+        self.adj_matrix = self.get_adj_matrix()
 
 
-    def _get_a_adj_matrix(self):
+    def get_adj_matrix(self):
         """
-        得到 系数矩阵A~
-        :return:
+        making adjecent matrix
+        A : (N_user + N_item) X (N_user + N_item) sparse matrix, which elements are all zero
+        inter_matrix   - row : user, col : item
+        inter_matrix_t - row : item, col : user
+        D : (N_user + N_item) X (N_user + N_item) diagonal matrix, each element denote number of non_zero row
         """
-        A = sp.dok_matrix((self.user_count + self.item_count, self.user_count + self.item_count), dtype=float)
+        A = sp.dok_matrix((self.n_user + self.n_item, self.n_user + self.n_item), dtype=float)
         inter_matrix = self.interaction_matrix
         inter_matrix_t = self.interaction_matrix.transpose()
-        data_dict = dict(zip(zip(inter_matrix.row, inter_matrix.col + self.user_count), [1] * inter_matrix.nnz))
-        data_dict.update(dict(zip(zip(inter_matrix_t.row + self.user_count, inter_matrix_t.col), [1] * inter_matrix_t.nnz)))
+
+        # make bidirectional graph
+        data_dict = dict(zip(zip(inter_matrix.row, inter_matrix.col + self.n_user), [1] * inter_matrix.nnz))
+        data_dict.update(dict(zip(zip(inter_matrix_t.row + self.n_user, inter_matrix_t.col), [1] * inter_matrix_t.nnz)))
+
+        # update A matrix
         A._update(data_dict)
+
+        # Make D matrix
         sum_list = (A > 0).sum(axis=1)
         diag = np.array(sum_list.flatten())[0] + 1e-7
         diag = np.power(diag, -0.5)
         D = sp.diags(diag)
+
+        # Normalization & change to pytorch sparse matrix
         A_adj = D * A * D
         A_adj = sp.coo_matrix(A_adj)
         row = A_adj.row
@@ -54,7 +56,8 @@ class LightGCN(nn.Module):
 
         result = [in_embs]
         for i in range(self.n_layers):
-            in_embs = torch.sparse.mm(self.A_adj_matrix.to(self.device), in_embs)
+            # calculation of sparse matrix(type : torch.sparse.FloatTensor) & dense matrix(type : torch.FloatTensor)
+            in_embs = torch.sparse.mm(self.adj_matrix.to(self.device), in_embs)
             in_embs = F.normalize(in_embs, dim=-1)
             result.append(in_embs / (i + 1))
             result.append(in_embs)
