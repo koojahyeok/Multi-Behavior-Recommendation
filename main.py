@@ -16,7 +16,7 @@ import train
 import utils
 
 from model import BIPN
-
+import setproctitle
 
 '''
 Implementation of multi-behavior recommendation system
@@ -51,6 +51,7 @@ def parse_args():
     parser.add_argument('--data_name', type=str, default='tmall', help='choose data name')
     parser.add_argument('--loss', type=str, default='bpr', help='')
     parser.add_argument('--negative_cnt', type=int, default=4, help='Number of negative sample')
+    parser.add_argument('--num_workers', default=4, type=int, help='workers of dataloader')
 
     parser.add_argument('--if_load_model', type=bool, default=False, help='')
     parser.add_argument('--topk', type=list, default=[10, 20, 50, 80], help='')
@@ -66,11 +67,16 @@ def parse_args():
 
     parser.add_argument('--gpu_id', default=0, type=int, help='gpu_number')
     parser.add_argument('--train', default=True, type=eval, help='choose train or test')
+    parser.add_argument('--model', default='BIPN', type=str, help='model name')
 
     return parser.parse_args()
 
 if __name__ == '__main__':
+    setproctitle.setproctitle("jh")
+    wandb.init(project = "multi behavior recommendation project")
     args = parse_args()
+    wandb.run.name = (f'{args.model} with {args.data_name}')
+    wandb.run.save()
     device = torch.device(f'cuda:{args.gpu_id}')
 
     if args.data_name == 'tmall':
@@ -120,8 +126,10 @@ if __name__ == '__main__':
         # make dataloader
         train_dl = DataLoader(dataset=train_data,
                               batch_size=args.batch_size,
+                              num_workers=args.num_workers,
                               shuffle=True)
         valid_dl = DataLoader(dataset=valid_data,
+                              num_workers=args.num_workers,
                               batch_size=args.batch_size)
         
         # make matrices which we need

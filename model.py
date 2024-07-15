@@ -70,7 +70,7 @@ class BIPN(nn.Module):
 
         self.bhv_embs = nn.Parameter(torch.eye(len(self.behaviors)))
         self.global_Graph = LightGCN(self.device, self.layers, self.n_users + 1, self.n_items + 1, matrix_list[2])
-        self.behavior_Graph = LightGCN(self.device, self.layers, self.n_users + 1, self.n_items + 1, matrix_list[0][-1])
+        self.behavior_Graph = LightGCN(self.device, self.layers, self.n_users + 1, self.n_items + 1, matrix_list[0][0])
 
         self.RZ = nn.Linear(2 * self.embedding_size + len(self.behaviors), 2 * self.embedding_size, bias=False)
         self.U = nn.Linear(2 * self.embedding_size + len(self.behaviors), self.embedding_size, bias=False)
@@ -249,3 +249,113 @@ class BIPN(nn.Module):
         scores = torch.matmul(user_emb, self.storage_item_embeddings.transpose(0, 1))
 
         return scores
+    
+class MBCGCN(nn.Module):
+    def __init__(self, args, device, N_user, N_item, matrix_list):
+        super(MBCGCN, self).__init__()
+        '''
+        Input
+        args : arguments
+        N_user : Number of user
+        N_item : Number of item
+        matrix list = [inter_matrix, user_item_inter_set, all_inter_matrix]
+
+        device : select gpu device
+        layers : number of layers
+        reg_weight :
+        log_reg :
+        node_dropout :
+        message_dropour :
+        embedding_size : size of embedding
+        inter_matrix : interaction matrices of each behaviors
+        user_item_inter_set : list of user_item set
+        test_users : list of test_users
+        behaviors : list of behavior
+
+        user_embedding : initialization of user_embedding (N_user + 1 , embedding_size)
+        item_embedding : initialization of item_embedding (N_item + 1 , embedding_size)
+        '''
+
+        self.device = device
+        self.layers = args.layers
+        self.reg_weight = args.reg_weight
+        self.log_reg = args.log_reg
+        self.node_dropout = args.node_dropout
+        self.message_dropout = nn.Dropout(p=args.message_dropout)
+        self.embedding_size = args.embedding_size
+        self.n_users = N_user
+        self.n_items = N_item
+        self.inter_matrix = matrix_list[0]
+        self.user_item_inter_set = matrix_list[1]
+        self.behaviors = args.behaviors
+        self.user_embedding = nn.Embedding(self.n_users + 1, self.embedding_size, padding_idx=0)
+        self.item_embedding = nn.Embedding(self.n_items + 1, self.embedding_size, padding_idx=0)
+
+        # Initialize lightGCN
+        self.b_cnt = len(self.behaviors)
+        self.GCN_blocks = []
+        for i in range(self.b_cnt):
+            if i == 0:
+                GCN_target_block = LightGCN(self.device, self.layers, self.n_users + 1, self.n_items + 1, matrix_list[0][i])
+            else:
+                GCN_block = LightGCN(self.device, self.layers, self.n_users + 1, self.n_items + 1, matrix_list[0][i])
+                self.GCN_blocks.append(GCN_block)
+        self.GCN_blocks.append(GCN_target_block)
+
+        # Initialize transformation matrix
+        self.weight_matrices = []
+        for i in range(self.b_cnt - 1):
+            weight = nn.Linear(2 * self.embedding_size, 2 * self.embedding_size, bias=False)
+            self.weight_matrices.append(weight)
+
+
+        self.apply(self._init_weights)
+
+
+    def _init_weights(self, module):
+        '''
+        embedding & parameter initialization by xavier initialization
+        '''
+
+        if isinstance(module, nn.Embedding):
+            nn.init.xavier_uniform_(module.weight.data)
+        elif isinstance(module, nn.Linear):
+            nn.init.xavier_normal_(module.weight.data)
+            if module.bias is not None:
+                nn.init.constant_(module.bias, 0)
+
+    def forward(self, x):
+        '''
+        Input : x (B, 2 + neg, 4)
+            B - batch size
+            2 + neg - 1 positive sample, negative samples, 1 signal 
+        '''
+        all_embeddings = torch.cat([self.user_embedding.weight, self.item_embedding.weight], dim=0)
+        GCN_user_results = []
+        GCN_item_results = []
+
+        for i in range(self.b_cnt):
+            # Cascading GCN Blocks
+            all_embeddings = self.GCN_blocks[i](all_embeddings)
+            user_embedding, item_embedding = torch.split(all_embeddings, [self.n_users + 1, self.n_items + 1])
+            GCN_user_results.append(user_embedding)
+            GCN_item_results.append(item_embedding)
+
+            # Feature Transformation - only auxilary behavior
+            if i < self.b_cnt - 1:
+                all_embeddings = self.weight_matrices[i](all_embeddings)
+        
+        # embedding aggregation
+        user_embedding = sum(GCN_user_results)
+        item_embedding = sum(GCN_item_results)
+
+        p_sample = x[:, 0, :]                       # (B, 1, 4)
+        n_sample = x[:, 1:-1, :].reshape(-1, 4)     # (B, neg, 4)
+        samples = torch.cat([p_sample, n_sample], dim=0)
+
+        u_sample, i_samples, b_samples, gt_samples = torch.chunk(samples, 4, dim=-1)    # each : (B, neg+1, 1)
+
+
+# def BPRLoss(p_score, n_score):
+#     loss = -torch.log(torch.sigmoid(p_score - n_score))
+#     return loss.mean()

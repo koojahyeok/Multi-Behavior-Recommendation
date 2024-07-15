@@ -47,7 +47,7 @@ class LightGCN(nn.Module):
         A_adj = sp.coo_matrix(A_adj)
         row = A_adj.row
         col = A_adj.col
-        index = torch.LongTensor([row, col])
+        index = torch.LongTensor(np.array([row, col]))
         data = torch.FloatTensor(A_adj.data)
         A_sparse = torch.sparse.FloatTensor(index, data, torch.Size(A_adj.shape))
         return A_sparse

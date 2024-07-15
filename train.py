@@ -8,6 +8,8 @@ from loguru import logger
 from torch import optim
 from tqdm import tqdm
 import utils
+import setproctitle
+import wandb
 
 
 from metrics import metrics_dict
@@ -37,8 +39,8 @@ def train(args, device, train_dl, valid_dl, model, dicts):
                     best_dict = validate_metric_dict
                     best_model = copy.deepcopy(model)
                     best_epoch = epoch
-                # if epoch - best_epoch > 4:
-                #     break
+                if epoch - best_epoch > 4:
+                    break
         # save the best model
         torch.save(best_model.state_dict(), os.path.join(args.model_path, args.model_name + '.pth'))
         logger.info(f"training end, best iteration %d, results: %s" %
@@ -59,6 +61,7 @@ def train_one_epoch(args, device, train_dl, valid_dl, epoch, model, optimizer, d
     total_loss = 0.0
     batch_no = 0
     for idx, data in train_dl_iter:
+        setproctitle.setproctitle(f"성공기원 | {epoch}/{args.epochs}")
         start = time.time()
         data = data.to(device)
         optimizer.zero_grad()
@@ -70,6 +73,7 @@ def train_one_epoch(args, device, train_dl, valid_dl, epoch, model, optimizer, d
         total_loss += loss.item()
 
     total_loss = total_loss / batch_no
+    wandb.log({"Training loss": loss})
 
     epoch_time = time.time() - start
     logger.info('epoch %d %.2fs Train loss is [%.4f] ' % (epoch + 1, epoch_time, total_loss))
@@ -82,6 +86,7 @@ def train_one_epoch(args, device, train_dl, valid_dl, epoch, model, optimizer, d
     epoch_time = time.time() - start_time
     logger.info(
         f"validate %d cost time %.2fs, result: %s " % (epoch + 1, epoch_time, validate_metric_dict.__str__()))
+    wandb.log({"metric": validate_metric_dict})
 
     # # test
     # start_time = time.time()
@@ -113,7 +118,7 @@ def evaluate(args, device, model, epoch, batch_size, dl, dicts):
             data = data.to(device)
             start = time.time()
             
-            user = data[:, 0]
+            users = data[:, 0]
 
             scores = model.full_predict(data[:, 0])
 
@@ -123,26 +128,26 @@ def evaluate(args, device, model, epoch, batch_size, dl, dicts):
                 if items is not None:
                     user_score[items] = -np.inf
                 _, topk_idx = torch.topk(user_score, max(args.topk), dim=-1)
-                gt_items = data[user.item(), 1]
-                mask = np.isin(topk_idx.to('cpu'), gt_items)
+                gt_items = data[index, 1]
+                mask = np.isin(topk_idx.cpu().numpy(), gt_items.cpu().numpy())
                 topk_list.append(mask)
 
         topk_list = np.array(topk_list)
-        metric_dict = calculate_result(topk_list, gt_length)
+        metric_dict = calculate_result(args, topk_list, gt_length)
         return metric_dict
 
 
 
-def calculate_result(self, topk_list, gt_len):
+def calculate_result(args, topk_list, gt_len):
     result_list = []
-    for metric in self.metrics:
+    for metric in args.metrics:
         metric_fuc = metrics_dict[metric.lower()]
         result = metric_fuc(topk_list, gt_len)
         result_list.append(result)
     result_list = np.stack(result_list, axis=0).mean(axis=1)
     metric_dict = {}
-    for topk in self.topk:
-        for metric, value in zip(self.metrics, result_list):
+    for topk in args.topk:
+        for metric, value in zip(args.metrics, result_list):
             key = '{}@{}'.format(metric, topk)
             metric_dict[key] = np.round(value[topk - 1], 4)
 

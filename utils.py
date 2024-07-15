@@ -92,9 +92,23 @@ def make_inter_matrix(pth, behaviors, N_user, N_item):
     return inter_matrices, user_item_inter_set, all_inter_matrix, dicts
 
 def make_gt_length(pth):
+
+    dict = {}
+
     with open(os.path.join(pth, 'test.txt'), encoding='utf-8') as f:
-        b_dict = json.load(f)
-        test_interacts = b_dict
-    gt_length = np.array([len(x) for _, x in test_interacts.items()])
+        lines = f.readlines()
+
+        for line in lines:
+            line = line.strip('\n').strip().split()
+
+            user = line[0]
+            item = line[1]
+
+            if user in dict:
+                dict[user].append(item)
+            else:
+                dict[user] = [item]
+
+    gt_length = np.array([len(x) for _, x in dict.items()])
 
     return gt_length
