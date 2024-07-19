@@ -19,6 +19,7 @@ class TrainDataset(Dataset):
         self.neg_cnt = negative_cnt
         
         # make all user_item interaction list
+        self.user_interactions = {}
         all_u_i_inters = []
 
         for idx, behavior in enumerate(self.behaviors):
@@ -26,8 +27,11 @@ class TrainDataset(Dataset):
                 lines = r.readlines()
                 for line in lines:
                     user, item = line.split()
+                    if int(user) not in self.user_interactions:
+                        self.user_interactions[int(user)] = []
                     # user_id, item_id, behavior index, 1-positive sample, if 0, negative sample
                     all_u_i_inters.append([int(user), int(item), idx, 1])
+                    self.user_interactions[int(user)].append(np.array([int(user), int(item), idx, 1]))
         
         self.all_u_i_inters = np.array(all_u_i_inters)          # (#u_i_interactions x 4)
 
@@ -45,7 +49,9 @@ class TrainDataset(Dataset):
         u_id = pos[0]
         total.append(pos)
 
-        u_i_inters = self.all_u_i_inters[self.all_u_i_inters[:, 0] == u_id]
+        u_i_inters = self.user_interactions[u_id]
+        u_i_inters = np.array(u_i_inters).squeeze()
+
         # get negative sampe
         for i in range(self.neg_cnt):
             item = random.randint(1, self.i_cnt)

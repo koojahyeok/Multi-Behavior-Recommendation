@@ -15,7 +15,7 @@ from torch.utils.data import DataLoader
 import train
 import utils
 
-from model import BIPN
+from model import BIPN, MBCGCN
 import setproctitle
 
 '''
@@ -58,7 +58,7 @@ def parse_args():
     parser.add_argument('--metrics', type=list, default=['hit', 'ndcg'], help='')
     parser.add_argument('--lr', type=float, default=0.001, help='')
     parser.add_argument('--decay', type=float, default=0.001, help='')
-    parser.add_argument('--batch_size', type=int, default=64, help='set batch size')
+    parser.add_argument('--batch_size', type=int, default=1024, help='set batch size')
     parser.add_argument('--min_epoch', type=str, default=5, help='')
     parser.add_argument('--epochs', type=str, default=200, help='')
     parser.add_argument('--model_path', type=str, default='./check_point', help='')
@@ -138,14 +138,19 @@ if __name__ == '__main__':
         matrix_list.append(inter_matrix)
         matrix_list.append(user_item_inter_set)
         matrix_list.append(all_inter_matrix)
-
-        model = BIPN(args, device, N_user, N_item, matrix_list).to(device)
+        if args.model == 'BIPN':
+            model = BIPN(args, device, N_user, N_item, matrix_list).to(device)
+        elif args.model == 'MBCGCN':
+            model = MBCGCN(args, device, N_user, N_item, matrix_list).to(device)
+        else:
+            raise Exception('model name cannot be None')
         
-        train.train(args, device, train_dl, valid_dl, model, dicts)
+        train.train(args, device, train_dl, valid_dl, model, dicts[args.behaviors[0]])
 
 
     else:
         #test mode
         test_data = dataset.TestDataset(os.path.join(args.data_pth, 'test.txt'))
         test_dl = DataLoader(dataset=test_data,
+                              num_workers=args.num_workers,
                               batch_size=args.batch_size)

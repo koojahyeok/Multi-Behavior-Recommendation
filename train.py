@@ -15,6 +15,7 @@ import wandb
 from metrics import metrics_dict
 
 def train(args, device, train_dl, valid_dl, model, dicts):
+    gt_length = utils.make_gt_length(args.data_pth)
     optimizer = optim.Adam(filter(lambda p: p.requires_grad, model.parameters()),
                                lr=args.lr,
                                weight_decay=args.decay)
@@ -28,7 +29,7 @@ def train(args, device, train_dl, valid_dl, model, dicts):
     for epoch in tqdm(range(args.epochs), dynamic_ncols=True):
         print(f"{epoch+1} training...")
         model.train()
-        validate_metric_dict = train_one_epoch(args, device, train_dl, valid_dl, epoch, model, optimizer, dicts)
+        validate_metric_dict = train_one_epoch(args, device, train_dl, valid_dl, epoch, model, optimizer, dicts, gt_length)
 
         if validate_metric_dict is not None:
                 result = validate_metric_dict['hit@20']
@@ -39,17 +40,18 @@ def train(args, device, train_dl, valid_dl, model, dicts):
                     best_dict = validate_metric_dict
                     best_model = copy.deepcopy(model)
                     best_epoch = epoch
-                if epoch - best_epoch > 4:
-                    break
+                # if epoch - best_epoch > 4:
+                #     break
         # save the best model
         torch.save(best_model.state_dict(), os.path.join(args.model_path, args.model_name + '.pth'))
-        logger.info(f"training end, best iteration %d, results: %s" %
-                    (best_epoch + 1, best_dict.__str__()))
-
+        logger.info(f"training end, curr iteration %d, results: %s" %
+                    (epoch + 1, validate_metric_dict.__str__()))
+        # logger.info(f"training end, best iteration %d, results: %s" %
+        #             (best_epoch + 1, best_dict.__str__()))
+        logger.info(f"best epoch : {best_epoch + 1}")
         # logger.info(f"final test result is:  %s" % final_test.__str__())
 
-def train_one_epoch(args, device, train_dl, valid_dl, epoch, model, optimizer, dicts):
-    start_time = time.time()
+def train_one_epoch(args, device, train_dl, valid_dl, epoch, model, optimizer, dicts, gt_length):
     train_dl_iter = (
         tqdm(
             enumerate(train_dl),
@@ -57,12 +59,12 @@ def train_one_epoch(args, device, train_dl, valid_dl, epoch, model, optimizer, d
             desc=f"\033[1;35m Train {epoch + 1:>5}\033[0m"
         )
     )
-
+    start_time = time.time()
     total_loss = 0.0
     batch_no = 0
     for idx, data in train_dl_iter:
-        setproctitle.setproctitle(f"성공기원 | {epoch}/{args.epochs}")
-        start = time.time()
+        setproctitle.setproctitle(f"JH | {epoch}/{args.epochs} | {idx}/{len(train_dl_iter)}")
+        # start = time.time()
         data = data.to(device)
         optimizer.zero_grad()
         loss = model(data)
@@ -71,21 +73,18 @@ def train_one_epoch(args, device, train_dl, valid_dl, epoch, model, optimizer, d
         optimizer.step()
         batch_no = idx + 1
         total_loss += loss.item()
-
+    epoch_time = time.time() - start_time
     total_loss = total_loss / batch_no
     wandb.log({"Training loss": loss})
 
-    epoch_time = time.time() - start
     logger.info('epoch %d %.2fs Train loss is [%.4f] ' % (epoch + 1, epoch_time, total_loss))
 
     # clear_parameter(model)
     # validate
 
-    start_time = time.time()
-    validate_metric_dict = evaluate(args, device, model, epoch, args.batch_size, valid_dl, dicts)
-    epoch_time = time.time() - start_time
-    logger.info(
-        f"validate %d cost time %.2fs, result: %s " % (epoch + 1, epoch_time, validate_metric_dict.__str__()))
+    validate_metric_dict = evaluate(args, device, model, epoch, args.batch_size, valid_dl, dicts, gt_length)
+    # logger.info(
+    #     f"validate %d cost time %.2fs, result: %s " % (epoch + 1, epoch_time, validate_metric_dict.__str__()))
     wandb.log({"metric": validate_metric_dict})
 
     # # test
@@ -99,12 +98,10 @@ def train_one_epoch(args, device, train_dl, valid_dl, epoch, model, optimizer, d
     return validate_metric_dict
 
 
-def evaluate(args, device, model, epoch, batch_size, dl, dicts):
-    gt_length = utils.make_gt_length(args.data_pth)
+def evaluate(args, device, model, epoch, batch_size, dl, dicts, gt_length):
 
     model.eval()
     with torch.no_grad():
-        start_time = time.time()
         iter_data = (
             tqdm(
                 enumerate(dl),
@@ -120,11 +117,11 @@ def evaluate(args, device, model, epoch, batch_size, dl, dicts):
             
             users = data[:, 0]
 
-            scores = model.full_predict(data[:, 0])
+            scores = model.full_predict(users)
 
-            for index, user in enumerate(data[:, 0]):
+            for index, user in enumerate(users):
                 user_score = scores[index]
-                items = dicts.get(str(user.item()), None)
+                items = [int(item) for item in dicts.get(str(user.item()))]
                 if items is not None:
                     user_score[items] = -np.inf
                 _, topk_idx = torch.topk(user_score, max(args.topk), dim=-1)

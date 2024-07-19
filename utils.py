@@ -73,7 +73,7 @@ def make_inter_matrix(pth, behaviors, N_user, N_item):
             
             dicts[behavior] = bdict
             
-            values = torch.ones(len(row), dtype=torch.float32)
+            values = torch.ones(len(row), dtype=torch.float64)
             inter_matrix = sp.coo_matrix((values, (row, col)), [N_user + 1, N_item + 1])
             # .tocsr() - change coo(Coordinate) style to csr(Compressed Sparse Row) style
             user_item_set = [list(row.nonzero()[1]) for row in inter_matrix.tocsr()]
@@ -86,7 +86,7 @@ def make_inter_matrix(pth, behaviors, N_user, N_item):
     all_edge_index = list(set(zip(all_row, all_col)))
     all_row = [sub[0] for sub in all_edge_index]
     all_col = [sub[1] for sub in all_edge_index]
-    values = torch.ones(len(all_row), dtype=torch.float32)
+    values = torch.ones(len(all_row), dtype=torch.float64)
     all_inter_matrix = sp.coo_matrix((values, (all_row, all_col)), [N_user + 1, N_item + 1])
 
     return inter_matrices, user_item_inter_set, all_inter_matrix, dicts
@@ -95,7 +95,7 @@ def make_gt_length(pth):
 
     dict = {}
 
-    with open(os.path.join(pth, 'test.txt'), encoding='utf-8') as f:
+    with open(os.path.join(pth, 'validation.txt'), encoding='utf-8') as f:
         lines = f.readlines()
 
         for line in lines:
