@@ -13,9 +13,11 @@ import json
 import dataset
 from torch.utils.data import DataLoader
 import train
+import test
 import utils
 
-from model import BIPN, MBCGCN
+from model.bipn import BIPN
+from model.mbcgcn import MBCGCN
 import setproctitle
 
 '''
@@ -42,7 +44,7 @@ def parse_args():
     parser.add_argument('--embedding_size', type=int, default=64, help='Choose Embedding size')
     parser.add_argument('--reg_weight', type=float, default=1e-3, help='')
     parser.add_argument('--log_reg', type=float, default=0.5, help='')
-    parser.add_argument('--layers', type=int, default=2)
+    parser.add_argument('--layers', type=int, default=3)
     parser.add_argument('--node_dropout', type=float, default=0.75)
     parser.add_argument('--message_dropout', type=float, default=0.25)
     parser.add_argument('--omega', type=float, default=1)
@@ -63,7 +65,7 @@ def parse_args():
     parser.add_argument('--epochs', type=str, default=200, help='')
     parser.add_argument('--model_path', type=str, default='./check_point', help='')
     parser.add_argument('--check_point', type=str, default='', help='')
-    parser.add_argument('--model_name', type=str, default='tmall', help='')
+    parser.add_argument('--model_name', type=str, default='BIPN', help='')
 
     parser.add_argument('--gpu_id', default=0, type=int, help='gpu_number')
     parser.add_argument('--train', default=True, type=eval, help='choose train or test')
@@ -73,20 +75,20 @@ def parse_args():
 
 if __name__ == '__main__':
     setproctitle.setproctitle("jh")
-    wandb.init(project = "multi behavior recommendation project")
     args = parse_args()
-    wandb.run.name = (f'{args.model} with {args.data_name}')
+    wandb.init(project = f"multi behavior recommendation project with {args.model} for {args.data_name}")
+    wandb.run.name = (f'{args.model} for {args.data_name} lr :{args.lr}, log_reg : {args.log_reg}, reg_weight : {args.reg_weight}')
     wandb.run.save()
     device = torch.device(f'cuda:{args.gpu_id}')
 
     if args.data_name == 'tmall':
-        args.data_pth = './data/Tmall'
+        args.data_pth = '/disks/ssd1/jahyeok/MBR_data/Tmall'
         args.behaviors = ['buy', 'click', 'collect', 'cart']
     elif args.data_name == 'taobao':
-        args.data_pth = './data/taobao'
+        args.data_pth = '/disks/ssd1/jahyeok/MBR_data/taobao'
         args.behaviors = ['buy', 'view', 'cart']
     elif args.data_name == 'beibei':
-        args.data_pth = './data/beibei'
+        args.data_pth = '/disks/ssd1/jahyeok/MBR_data/beibei'
         args.behaviors = ['buy', 'view', 'cart']
     else:
         raise Exception('data_name cannot be None')
@@ -105,9 +107,6 @@ if __name__ == '__main__':
     
     TIME = time.strftime("%Y-%m-%d %H_%M_%S", time.localtime())
     args.TIME = TIME
-
-    logfile = '{}_enb_{}_{}'.format(args.data_name, args.embedding_size, TIME)
-    logger.add('./log/{}/{}.log'.format(args.model_name, logfile), encoding='utf-8')
 
     start = time.time()
 
@@ -154,3 +153,23 @@ if __name__ == '__main__':
         test_dl = DataLoader(dataset=test_data,
                               num_workers=args.num_workers,
                               batch_size=args.batch_size)
+        
+        # make matrices which we need
+        inter_matrix, user_item_inter_set, all_inter_matrix, dicts = utils.make_inter_matrix(args.data_pth, args.behaviors, N_user, N_item)
+        matrix_list = []
+        matrix_list.append(inter_matrix)
+        matrix_list.append(user_item_inter_set)
+        matrix_list.append(all_inter_matrix)
+
+        if args.model == 'BIPN':
+            model = BIPN(args, device, N_user, N_item, matrix_list).to(device)
+        elif args.model == 'MBCGCN':
+            model = MBCGCN(args, device, N_user, N_item, matrix_list).to(device)
+        else:
+            raise Exception('model name cannot be None')
+        
+        # model load
+        model_pth = os.path.join(args.model_path, args.data_name, args.model, str(args.lr), str(args.layers), 'model' + '.pth')
+        model.load_state_dict(torch.load(model_pth, weights_only=True))
+
+        test.test(args, device, test_dl, model, dicts[args.behaviors[0]])

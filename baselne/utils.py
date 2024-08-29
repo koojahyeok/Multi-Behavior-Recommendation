@@ -1,45 +1,8 @@
-#!/usr/bin/env python
-# -*- coding: utf-8 -*-
-# @File  : utils.py
-# @Author:
-# @Date  : 2023/9/23 11:26
-# @Desc  :
 import torch
-import torch.nn as nn
 import os
 import scipy.sparse as sp
 import json
 import numpy as np
-
-class BPRLoss(nn.Module):
-    def __init__(self):
-        super(BPRLoss, self).__init__()
-        self.gamma = 1e-10
-
-    def forward(self, p_score, n_score):
-        loss = -torch.log(self.gamma + torch.sigmoid(p_score - n_score))
-        loss = loss.mean()
-
-        return loss
-
-
-class EmbLoss(nn.Module):
-    """ EmbLoss, regularization on embeddings
-
-    """
-
-    def __init__(self, norm=2):
-        super(EmbLoss, self).__init__()
-        self.norm = norm
-
-    def forward(self, *embeddings):
-        emb_loss = 0
-        for embedding in embeddings:
-            tmp = torch.norm(embedding, p=self.norm)
-            tmp = tmp / embedding.shape[0]
-            emb_loss += tmp
-        return emb_loss
-
 
 # return interaction matrix & user_item_set & all_interaction matrix
 # it shows user-item interaction, if they interact 1, no 0
@@ -91,24 +54,45 @@ def make_inter_matrix(pth, behaviors, N_user, N_item):
 
     return inter_matrices, user_item_inter_set, all_inter_matrix, dicts
 
-def make_gt_length(pth):
+def make_gt_length(pth, type):
 
     dict = {}
+        
+    # validation    
+    if type:    
+        with open(os.path.join(pth, 'validation.txt'), encoding='utf-8') as f:
+            lines = f.readlines()
 
-    with open(os.path.join(pth, 'validation.txt'), encoding='utf-8') as f:
-        lines = f.readlines()
+            for line in lines:
+                line = line.strip('\n').strip().split()
 
-        for line in lines:
-            line = line.strip('\n').strip().split()
+                user = line[0]
+                item = line[1]
 
-            user = line[0]
-            item = line[1]
+                if user in dict:
+                    dict[user].append(item)
+                else:
+                    dict[user] = [item]
 
-            if user in dict:
-                dict[user].append(item)
-            else:
-                dict[user] = [item]
+        gt_length = np.array([len(x) for _, x in dict.items()])
 
-    gt_length = np.array([len(x) for _, x in dict.items()])
+    # test
+    else:
+        with open(os.path.join(pth, 'test.txt'), encoding='utf-8') as f:
+            lines = f.readlines()
+
+            for line in lines:
+                line = line.strip('\n').strip().split()
+
+                user = line[0]
+                item = line[1]
+
+                if user in dict:
+                    dict[user].append(item)
+                else:
+                    dict[user] = [item]
+
+        gt_length = np.array([len(x) for _, x in dict.items()])
+
 
     return gt_length

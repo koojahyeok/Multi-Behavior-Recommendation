@@ -6,7 +6,6 @@ import torch
 import numpy as np
 from loguru import logger
 from torch import optim
-from tqdm import tqdm
 import utils
 import setproctitle
 import wandb
@@ -15,7 +14,7 @@ import wandb
 from metrics import metrics_dict
 
 def train(args, device, train_dl, valid_dl, model, dicts):
-    gt_length = utils.make_gt_length(args.data_pth)
+    gt_length = utils.make_gt_length(args.data_pth, 1)
     optimizer = optim.Adam(filter(lambda p: p.requires_grad, model.parameters()),
                                lr=args.lr,
                                weight_decay=args.decay)
@@ -26,44 +25,44 @@ def train(args, device, train_dl, valid_dl, model, dicts):
     best_model = None
     final_test = None
 
-    for epoch in tqdm(range(args.epochs), dynamic_ncols=True):
-        print(f"{epoch+1} training...")
+    for epoch in range(args.epochs):
         model.train()
         validate_metric_dict = train_one_epoch(args, device, train_dl, valid_dl, epoch, model, optimizer, dicts, gt_length)
 
         if validate_metric_dict is not None:
-                result = validate_metric_dict['hit@20']
-                # early stop
-                if result - best_result > 0:
-                    # final_test = test_metric_dict
-                    best_result = result
-                    best_dict = validate_metric_dict
-                    best_model = copy.deepcopy(model)
-                    best_epoch = epoch
-                # if epoch - best_epoch > 4:
-                #     break
+            result = validate_metric_dict['hit@20']
+            # early stop
+            if result - best_result > 0:
+                # final_test = test_metric_dict
+                best_result = result
+                best_dict = validate_metric_dict
+                best_model = copy.deepcopy(model)
+                best_epoch = epoch
+                print(f"best epoch : {best_epoch + 1}")
+                print(f"recording!!, curr iteration %d, results: %s" %
+                            (epoch + 1, validate_metric_dict.__str__()))                    
+            if epoch - best_epoch > 40:
+                break
         # save the best model
-        torch.save(best_model.state_dict(), os.path.join(args.model_path, args.model_name + '.pth'))
-        logger.info(f"training end, curr iteration %d, results: %s" %
-                    (epoch + 1, validate_metric_dict.__str__()))
-        # logger.info(f"training end, best iteration %d, results: %s" %
+        model_pth = os.path.join(args.model_path, args.data_name, args.model, str(args.lr), str(args.log_reg), str(args.reg_weight))
+        if not os.path.exists(model_pth):
+            os.makedirs(model_pth)
+        torch.save(best_model.state_dict(), os.path.join(model_pth, 'model' + '.pth'))
+        # print(f"training end, curr iteration %d, results: %s" %
+        #             (epoch + 1, validate_metric_dict.__str__()))
+        # print(f"training end, best iteration %d, results: %s" %
         #             (best_epoch + 1, best_dict.__str__()))
-        logger.info(f"best epoch : {best_epoch + 1}")
-        # logger.info(f"final test result is:  %s" % final_test.__str__())
+        # print(f"best epoch : {best_epoch + 1}")
+        # print(f"final test result is:  %s" % final_test.__str__())
+    
+    print(f'final best epoch : {best_epoch + 1} & metric : {best_dict.__str__()}')
 
 def train_one_epoch(args, device, train_dl, valid_dl, epoch, model, optimizer, dicts, gt_length):
-    train_dl_iter = (
-        tqdm(
-            enumerate(train_dl),
-            total=len(train_dl),
-            desc=f"\033[1;35m Train {epoch + 1:>5}\033[0m"
-        )
-    )
     start_time = time.time()
     total_loss = 0.0
     batch_no = 0
-    for idx, data in train_dl_iter:
-        setproctitle.setproctitle(f"JH | {epoch}/{args.epochs} | {idx}/{len(train_dl_iter)}")
+    for idx, data in enumerate(train_dl):
+        setproctitle.setproctitle(f"JH | {epoch}/{args.epochs} | {idx}/{len(train_dl)}")
         # start = time.time()
         data = data.to(device)
         optimizer.zero_grad()
@@ -77,13 +76,13 @@ def train_one_epoch(args, device, train_dl, valid_dl, epoch, model, optimizer, d
     total_loss = total_loss / batch_no
     wandb.log({"Training loss": loss})
 
-    logger.info('epoch %d %.2fs Train loss is [%.4f] ' % (epoch + 1, epoch_time, total_loss))
+    # print('epoch %d %.2fs Train loss is [%.4f] ' % (epoch + 1, epoch_time, total_loss))
 
     # clear_parameter(model)
     # validate
 
     validate_metric_dict = evaluate(args, device, model, epoch, args.batch_size, valid_dl, dicts, gt_length)
-    # logger.info(
+    # print(
     #     f"validate %d cost time %.2fs, result: %s " % (epoch + 1, epoch_time, validate_metric_dict.__str__()))
     wandb.log({"metric": validate_metric_dict})
 
@@ -92,7 +91,7 @@ def train_one_epoch(args, device, train_dl, valid_dl, epoch, model, optimizer, d
     # test_metric_dict = evaluate(epoch, test_batch_size, dataset.test_dataset(),
     #                                     dataset.test_interacts, dataset.test_gt_length)
     # epoch_time = time.time() - start_time
-    # logger.info(
+    # print(
     #     f"test %d cost time %.2fs, result: %s " % (epoch + 1, epoch_time, test_metric_dict.__str__()))
 
     return validate_metric_dict
@@ -102,16 +101,10 @@ def evaluate(args, device, model, epoch, batch_size, dl, dicts, gt_length):
 
     model.eval()
     with torch.no_grad():
-        iter_data = (
-            tqdm(
-                enumerate(dl),
-                total=len(dl),
-                desc=f"\033[1;35mEvaluate \033[0m"
-            )
-        )
+
         topk_list = []
 
-        for idx, data in iter_data:
+        for idx, data in enumerate(dl):
             data = data.to(device)
             start = time.time()
             
@@ -121,7 +114,10 @@ def evaluate(args, device, model, epoch, batch_size, dl, dicts, gt_length):
 
             for index, user in enumerate(users):
                 user_score = scores[index]
-                items = [int(item) for item in dicts.get(str(user.item()))]
+                try:
+                    items = [int(item) for item in dicts.get(str(user.item()))]
+                except:
+                    items = None
                 if items is not None:
                     user_score[items] = -np.inf
                 _, topk_idx = torch.topk(user_score, max(args.topk), dim=-1)

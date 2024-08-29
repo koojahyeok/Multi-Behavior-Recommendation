@@ -57,14 +57,22 @@ class TrainDataset(Dataset):
             item = random.randint(1, self.i_cnt)
 
             # check negativity
-            while np.isin(item, u_i_inters[:, 1]):
-                item = random.randint(1, self.i_cnt)
+            if u_i_inters.ndim == 2:
+                while np.isin(item, u_i_inters[:, 1]):
+                    item = random.randint(1, self.i_cnt)
+            else:
+                while item != u_i_inters[1]:
+                    item = random.randint(1, self.i_cnt)
             
             neg = np.array([u_id, item, pos[2], 0])
             total.append(neg)
 
         # get interaction which only contain behavior 'buy'
-        buy_inters = u_i_inters[u_i_inters[:, 2] == 0]
+        if u_i_inters.ndim == 2:
+            buy_inters = u_i_inters[u_i_inters[:, 2] == 0]
+        else:
+            buy_inters = u_i_inters[u_i_inters[2] == 0]
+
         if buy_inters.shape[0] == 0:
             signal = np.array([0, 0, 0, 0])
         else:
@@ -72,8 +80,12 @@ class TrainDataset(Dataset):
             n_item = random.randint(1, self.i_cnt)
 
              # check negativity
-            while np.isin(n_item, u_i_inters[:, 1]):
-                n_item = random.randint(1, self.i_cnt)
+            if u_i_inters.ndim == 2:
+                while np.isin(n_item, u_i_inters[:, 1]):
+                    n_item = random.randint(1, self.i_cnt)
+            else:
+                while n_item != u_i_inters[1]:
+                    n_item = random.randint(1, self.i_cnt)
             signal = np.array([u_id, p_item, n_item, 0])
         
         total.append(signal)
